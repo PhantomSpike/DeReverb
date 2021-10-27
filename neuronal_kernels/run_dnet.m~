@@ -1,0 +1,99 @@
+function kernel =  run_dnet(coch_in,y,params,k)
+
+%% Setup and params
+coch = coch_in.coch;
+X_ft(1).anech = coch(1).X_ft;
+X_ft(2).anech = coch(2).X_ft;
+X_ft(1).small = coch(3).X_ft;
+X_ft(2).small = coch(4).X_ft;
+X_ft(1).big = coch(5).X_ft;
+X_ft(2).big = coch(6).X_ft;
+n_cond = 2;
+
+%Unroll parameters 
+h_max_ms = params.h_max_ms;
+dt_ms = params.dt_ms;
+n_hu = params.n_hu;
+n_pass = params.n_pass;
+n_batch = params.n_batch;
+model = params.model;
+
+if mod(n_batch,2) ~= 0
+    error('The number of batches has to be even number');
+end
+lambda = params(k).lambda;
+
+n_h = round(h_max_ms/dt_ms); %Find the number of history steps necessary given the bin size and max history
+freqs = coch(1).params.freqs; %Get the freqeuncies that were used  
+t_edges_s = coch(1).t; %Get the edges in sec as used in the cochleagram
+r_type{1} = 'anech';
+r_type{2} = 'small';
+r_type{3} = 'big';
+n_rooms = length(r_type);
+%% Tensorize
+fprintf('== Tensorizing the cochleagrams ==\n');tic;
+for r = 1:n_rooms
+    room = r_type{r};
+    for c = 1:n_cond
+        X_fht(c).(room) = tensorize(X_ft(c).(room),n_h);
+    end
+end
+fprintf('== Done! This took %0.fs ==\n',toc);
+%% Make histograms for this cluster for all 3 conditions
+n_stim = length(y.stim);
+n_rep = length(y.stim(1).repeat);
+
+for s = 1:n_stim
+    psth_temp = [];
+    for r = 1:n_rep
+        psth_temp(r,:) = histc(y.stim(s).repeat(r).spiketimes,t_edges_s);
+    end
+    y_temp(s,:) = mean(psth_temp);
+end
+
+s = 0;
+for r = 1:n_rooms
+    room = r_type{r};
+    for c = 1:n_cond
+        s = s+1;
+        y_t(c).(room) = y_temp(s,:);
+    end
+end
+
+%% Make minibatches
+
+sz_minibatch = floor(length(y_temp(1,:))/(n_batch/2))-1;
+
+for r = 1:n_rooms
+    room = r_type{r};
+    n = 0;
+    train_nfht = [];
+    train_nt = [];
+    for c = 1:n_cond
+        for b = 1:n_batch/2
+            n = n+1;
+            ix_start = (b-1)*sz_minibatch + 1;
+            ix_end = ix_start + sz_minibatch;
+            train_nfht(n,:,:,:) =  X_fht(c).(room)(:,:,ix_start:ix_end);
+            train_nt(n,:) = y_t(c).(room)(ix_start:ix_end);
+        end
+    end
+    [kernel.(room).theta,kernel.(room).train_err]=fit_DNet_model(train_nfht,train_nt,'sq','abs',lambda(k).(room),{n_hu 1},'sigmoid',n_pass,'mDNet');
+end
+
+
+
+%% Fit the model for the different rooms
+
+kernel(1).coch_type = coch(1).type;
+kernel(1).dt_ms = dt_ms;
+kernel(1).h_max_ms = h_max_ms;
+kernel(1).n_h = n_h;
+kernel(1).model = model;
+kernel(1).freqs = freqs;
+kernel(1).n_hu = n_hu;
+kernel(1).n_pass = n_pass;
+kernel(1).n_batch = n_batch;
+kernel(1).lambda = lambda;
+
+end
