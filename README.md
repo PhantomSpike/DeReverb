@@ -1,7 +1,7 @@
 ### This code is associated with the paper from Ivanov et al., "Cortical adaptation to sound reverberation".
 
 
-![model image](/figures/fig1.pdf)
+![model image](/figures/fig5.png)
 
 ----
 
